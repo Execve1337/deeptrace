@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeepTrace OSINT | Intelligence Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --neon-blue: #00f2ff;
+            --neon-purple: #bc13fe;
+            --dark-bg: #05070a;
+        }
+        body { font-family: 'Space Grotesk', sans-serif; background-color: var(--dark-bg); color: #e2e8f0; overflow-x: hidden; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .glass { background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .neon-text-blue { text-shadow: 0 0 10px rgba(0, 242, 255, 0.5); color: var(--neon-blue); }
+        
+        /* Animations */
+        @keyframes loading-bar { 0% { width: 0%; transform: translateX(-100%); } 50% { width: 100%; transform: translateX(0); } 100% { width: 0%; transform: translateX(100%); } }
+        .loader-ring { border: 4px solid transparent; border-top: 4px solid var(--neon-blue); border-right: 4px solid var(--neon-purple); border-radius: 50%; width: 80px; height: 80px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .marquee { display: flex; overflow: hidden; user-select: none; gap: 2rem; border-top: 1px solid rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.05); padding: 15px 0; }
+        .marquee__content { flex-shrink: 0; display: flex; justify-content: space-around; min-width: 100%; gap: 4rem; animation: scroll 30s linear infinite; }
+        @keyframes scroll { from { transform: translateX(0); } to { transform: translateX(calc(-100% - 4rem)); } }
+        .fade-in-up { animation: fadeInUp 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards; opacity: 0; transform: translateY(30px); }
+        @keyframes fadeInUp { to { opacity: 1; transform: translateY(0); } }
+
+        /* Custom Scrollbar for TOS */
+        .tos-scroll::-webkit-scrollbar { width: 4px; }
+        .tos-scroll::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
+        .tos-scroll::-webkit-scrollbar-thumb { background: var(--neon-blue); border-radius: 10px; }
+    </style>
+</head>
+<body class="overflow-x-hidden">
+
+    <div id="splash-screen" class="fixed inset-0 z-[100] bg-[#05070a] flex flex-col items-center justify-center transition-opacity duration-1000">
+        <div class="relative">
+            <div class="absolute inset-0 rounded-full border border-cyan-500/30 animate-ping scale-150"></div>
+            <div class="bg-slate-900 p-8 rounded-full border border-cyan-500/50 shadow-[0_0_50px_rgba(0,242,255,0.2)]">
+                <svg class="w-12 h-12 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+            </div>
+        </div>
+        <h2 class="mt-10 text-xl font-bold tracking-[0.6em] text-white mono animate-pulse uppercase">Booting_DeepTrace_v2</h2>
+        <div class="mt-6 w-48 h-[2px] bg-white/10 rounded-full overflow-hidden">
+            <div class="h-full bg-cyan-500" style="animation: loading-bar 2s ease-in-out infinite;"></div>
+        </div>
+    </div>
+
+    <div id="tos-modal" class="fixed inset-0 z-[90] bg-black/90 backdrop-blur-md hidden flex items-center justify-center p-4">
+        <div class="glass max-w-2xl w-full p-8 rounded-[2rem] border-cyan-500/20 max-h-[80vh] flex flex-col">
+            <h2 class="text-2xl font-bold text-cyan-400 mono mb-4">LEGAL_CLEARANCE_REQUIRED</h2>
+            <div class="tos-scroll overflow-y-auto pr-4 text-sm text-slate-400 space-y-4 mb-8 mono">
+                <p>[SECTION 1: ACCEPTANCE] By accessing DeepTrace, you agree that this tool is for educational and authorized investigative purposes only.</p>
+                <p>[SECTION 2: PROHIBITED USE] You shall not use DeepTrace for stalking, harassment, or any illegal surveillance of private citizens.</p>
+                <p>[SECTION 3: LIABILITY] DeepTrace aggregates public data. We are not responsible for the accuracy of 3rd party nodes or the misuse of retrieved intelligence.</p>
+                <p>[SECTION 4: DATA USAGE] We do not store target data. Your search logs are encrypted and strictly for credit-billing verification.</p>
+            </div>
+            <button onclick="acceptTOS()" class="w-full bg-cyan-500 text-black font-black py-4 rounded-xl hover:bg-cyan-400 transition-all uppercase tracking-widest">I ACCEPT & VERIFY INTENT</button>
+        </div>
+    </div>
+
+    <div id="auth-modal" class="fixed inset-0 z-[80] bg-black/80 hidden flex items-center justify-center p-4">
+        <div class="glass max-w-md w-full p-10 rounded-[2.5rem] border-purple-500/30">
+            <div class="text-center mb-8">
+                <h3 class="text-3xl font-bold italic tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-purple-600">AUTH_REQUIRED</h3>
+                <p class="text-slate-500 text-xs mt-2 mono uppercase">Create your intelligence profile</p>
+            </div>
+            <div class="space-y-4">
+                <input type="email" id="auth-email" placeholder="ENCRYPTED EMAIL" class="w-full bg-black/40 border border-white/10 p-4 rounded-xl mono text-cyan-400 outline-none">
+                <input type="password" id="auth-password" placeholder="SECURITY CODE" class="w-full bg-black/40 border border-white/10 p-4 rounded-xl mono text-cyan-400 outline-none">
+                <div class="flex gap-2">
+                    <button onclick="handleSignUp()" class="flex-1 bg-white/5 border border-white/10 py-4 rounded-xl hover:bg-white/10 transition-all font-bold">SIGN UP</button>
+                    <button onclick="handleSignIn()" class="flex-1 bg-cyan-500 text-black py-4 rounded-xl hover:bg-cyan-400 transition-all font-bold">SIGN IN</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="main-content" class="opacity-0 transition-opacity duration-1000">
+        
+        <nav class="p-6 flex justify-between items-center max-w-7xl mx-auto relative z-20">
+            <div class="flex items-center gap-2">
+                <div class="w-3 h-3 bg-cyan-500 rounded-full animate-pulse"></div>
+                <span class="mono text-[10px] tracking-widest">STATUS: SYSTEM_ONLINE</span>
+            </div>
+            <div id="user-stats" class="flex items-center gap-6 hidden">
+                <div class="flex flex-col items-end">
+                    <span id="user-credits" class="text-cyan-400 font-bold mono">100 CREDITS</span>
+                    <button onclick="showPricing()" class="text-[9px] text-purple-400 hover:underline uppercase mono">Top Up Credits</button>
+                </div>
+                <button onclick="handleSignOut()" class="text-xs border border-white/10 px-4 py-2 rounded hover:bg-white/5 mono">SIGNOUT</button>
+            </div>
+        </nav>
+
+        <header class="relative pt-10 pb-10 flex flex-col items-center">
+            <h1 class="text-7xl md:text-8xl font-black italic tracking-tighter mb-4 z-10">
+                <span class="bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 uppercase">DeepTrace</span>
+            </h1>
+            
+            <div class="w-full marquee bg-slate-950/50">
+                <div class="marquee__content">
+                    <span class="mono text-[10px] text-cyan-400/60 uppercase">GitHub_Node_Active</span>
+                    <span class="mono text-[10px] text-purple-400/60 uppercase">LinkedIn_Proxy_Bypass</span>
+                    <span class="mono text-[10px] text-cyan-400/60 uppercase">IP_LIMITER_ACTIVE</span>
+                </div>
+            </div>
+        </header>
+
+        <section class="max-w-4xl mx-auto px-6 py-12">
+            <div class="glass p-10 rounded-[2.5rem] relative overflow-hidden shadow-2xl">
+                <div class="absolute top-0 right-0 p-4 mono text-[10px] text-slate-700 uppercase tracking-widest">Query Cost: 25 Credits</div>
+                <div class="space-y-6 relative z-10">
+                    <input type="text" id="username" placeholder="ENTER TARGET ALIAS..." 
+                           class="w-full bg-black/40 border border-white/10 p-6 rounded-2xl mono text-cyan-400 outline-none focus:border-cyan-500/50 transition-all uppercase placeholder:opacity-30 text-2xl">
+                    <button onclick="runGlobalScan()" 
+                            class="w-full bg-gradient-to-r from-cyan-400 to-blue-600 text-black font-black py-6 rounded-2xl hover:scale-[1.01] active:scale-[0.98] transition-all shadow-[0_0_40px_rgba(0,242,255,0.2)] uppercase tracking-widest">
+                        EXECUTE INVESTIGATION
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <div id="pricing-modal" class="fixed inset-0 z-[110] bg-black/95 hidden flex items-center justify-center p-4">
+            <div class="max-w-4xl w-full grid md:grid-cols-2 gap-8">
+                <div class="glass p-8 rounded-3xl border-cyan-500/20 flex flex-col items-center text-center">
+                    <h4 class="text-xl font-bold mb-4 uppercase">Basic Refill</h4>
+                    <p class="text-4xl font-black mb-6 text-cyan-400">$10.00</p>
+                    <ul class="text-sm text-slate-400 space-y-2 mb-8 mono">
+                        <li>+ 500 Credits</li>
+                        <li>Standard Node Speed</li>
+                        <li>Email Support</li>
+                    </ul>
+                    <button onclick="alert('Link Stripe Checkout URL here')" class="w-full py-4 bg-white/5 rounded-xl border border-white/10 hover:bg-white/10 font-bold uppercase">Purchase</button>
+                </div>
+                <div class="glass p-8 rounded-3xl border-purple-500/50 flex flex-col items-center text-center relative overflow-hidden">
+                    <div class="absolute top-4 right-[-35px] bg-purple-600 text-[9px] px-10 py-1 rotate-45 font-bold uppercase">Popular</div>
+                    <h4 class="text-xl font-bold mb-4 uppercase">Elite Access</h4>
+                    <p class="text-4xl font-black mb-6 text-purple-400">$29.00</p>
+                    <ul class="text-sm text-slate-400 space-y-2 mb-8 mono">
+                        <li>+ 2000 Credits</li>
+                        <li>Priority Node Access</li>
+                        <li>Full PDF Dossier Exports</li>
+                    </ul>
+                    <button onclick="alert('Link Stripe Checkout URL here')" class="w-full py-4 bg-purple-600 text-white rounded-xl hover:bg-purple-500 font-bold uppercase">Get Elite</button>
+                </div>
+            </div>
+            <button onclick="hidePricing()" class="absolute top-10 right-10 text-white mono">CLOSE [X]</button>
+        </div>
+
+        <main class="container mx-auto px-6 pb-20">
+            <div id="loading" class="hidden flex flex-col items-center py-20 space-y-8">
+                <div class="loader-ring"></div>
+                <h3 id="status-text" class="text-2xl font-bold neon-text-blue mono uppercase tracking-widest animate-pulse">Initializing...</h3>
+            </div>
+            <div id="results" class="hidden space-y-12">
+                <div id="platform-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // --- SUPABASE CONFIG ---
+        const SB_URL = "https://afgbpktsdpvleugzaqee.supabase.co";
+        const SB_KEY = "sb_publishable_WtXrNW98G-wUyg2E_WLucg_to9biPwe";
+        const supabaseClient = supabase.createClient(SB_URL, SB_KEY);
+
+        let userCredits = 0;
+
+        // --- AUTH LOGIC ---
+        async function checkSession() {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (session) {
+                document.getElementById('auth-modal').classList.add('hidden');
+                document.getElementById('user-stats').classList.remove('hidden');
+                fetchUserCredits(session.user.id);
+            } else {
+                document.getElementById('auth-modal').classList.remove('hidden');
+            }
+        }
+
+        async function handleSignUp() {
+            const email = document.getElementById('auth-email').value;
+            const password = document.getElementById('auth-password').value;
+            const { data, error } = await supabaseClient.auth.signUp({ email, password });
+            if (error) alert(error.message);
+            else {
+                await supabaseClient.from('profiles').insert([{ id: data.user.id, credits: 100 }]);
+                alert("Check your email for verification!");
+            }
+        }
+
+        async function handleSignIn() {
+            const email = document.getElementById('auth-email').value;
+            const password = document.getElementById('auth-password').value;
+            const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+            if (error) alert(error.message);
+            else location.reload();
+        }
+
+        async function handleSignOut() {
+            await supabaseClient.auth.signOut();
+            location.reload();
+        }
+
+        async function fetchUserCredits(userId) {
+            const { data, error } = await supabaseClient.from('profiles').select('credits').eq('id', userId).single();
+            if (data) {
+                userCredits = data.credits;
+                document.getElementById('user-credits').innerText = `${userCredits} CREDITS`;
+            }
+        }
+
+        // --- CORRECTED SPLASH SCREEN & UI FLOW ---
+        window.addEventListener('load', () => {
+            // Initial 2-second delay to showcase the splash screen
+            setTimeout(() => {
+                const splash = document.getElementById('splash-screen');
+                const main = document.getElementById('main-content');
+                
+                // 1. Start Fade-out
+                splash.style.opacity = '0';
+
+                // 2. Wait for transition duration (1000ms from CSS duration-1000)
+                setTimeout(() => {
+                    // 3. Remove splash from layout
+                    splash.style.display = 'none';
+
+                    // 4. Fade in main content
+                    main.classList.remove('opacity-0');
+
+                    // 5. Check logical gates (TOS -> Auth)
+                    if (!localStorage.getItem('tos_accepted')) {
+                        document.getElementById('tos-modal').classList.remove('hidden');
+                    } else {
+                        checkSession(); 
+                    }
+                }, 1000); 
+            }, 2000); 
+        });
+
+        function acceptTOS() {
+            localStorage.setItem('tos_accepted', 'true');
+            document.getElementById('tos-modal').classList.add('hidden');
+            checkSession();
+        }
+
+        function showPricing() { document.getElementById('pricing-modal').classList.remove('hidden'); }
+        function hidePricing() { document.getElementById('pricing-modal').classList.add('hidden'); }
+
+        // --- SCAN LOGIC ---
+        async function runGlobalScan() {
+            if (userCredits < 25) {
+                alert("Insufficient Credits. Please top up.");
+                showPricing();
+                return;
+            }
+
+            const username = document.getElementById('username').value;
+            if(!username) return;
+
+            document.getElementById('results').classList.add('hidden');
+            document.getElementById('loading').classList.remove('hidden');
+
+            try {
+                const { data: { user } } = await supabaseClient.auth.getUser();
+                const { error: creditError } = await supabaseClient.rpc('deduct_credits', { 
+                    user_id: user.id, 
+                    amount: 25 
+                });
+
+                if (creditError) throw new Error("Credit deduction failed");
+
+                const response = await fetch('/api/investigate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username: username})
+                });
+                const data = await response.json();
+                
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('results').classList.remove('hidden');
+                
+                fetchUserCredits(user.id);
+            } catch (e) {
+                console.error(e);
+                alert("Scan Error: " + e.message);
+                document.getElementById('loading').classList.add('hidden');
+            }
+        }
+    </script>
+</body>
+</html>
